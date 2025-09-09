@@ -1,7 +1,10 @@
 const { createServer } = require('http');
 const { Server } = require('socket.io');
 
-const port = 3003;
+// Get port from environment variable or default to 3003
+const port = process.env.PORT || 3003;
+const nextjsAppUrl = process.env.NEXTJS_APP_URL || 'http://localhost:3002';
+const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:3002';
 
 // Create HTTP server for Socket.io only
 const httpServer = createServer();
@@ -9,8 +12,9 @@ const httpServer = createServer();
 // Initialize Socket.io
 const io = new Server(httpServer, {
   cors: {
-    origin: "*",
+    origin: corsOrigin,
     methods: ["GET", "POST"],
+    credentials: true
   },
 });
 
@@ -40,8 +44,8 @@ io.on('connection', (socket) => {
         content: data.content
       });
 
-      // Save message to database via Next.js API (running on port 3002)
-      const response = await fetch(`http://localhost:3002/api/messages`, {
+      // Save message to database via Next.js API
+      const response = await fetch(`${nextjsAppUrl}/api/messages`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -62,6 +66,9 @@ io.on('connection', (socket) => {
         // Broadcast message to all users in the chat room
         io.to(data.chatId).emit('new-message', messageData.message);
         console.log(`Message sent to chat ${data.chatId}:`, data.content);
+      } else {
+        console.error('Failed to save message:', response.status, response.statusText);
+        socket.emit('message-error', { error: 'Failed to save message' });
       }
     } catch (error) {
       console.error('Error sending message:', error);
@@ -88,5 +95,6 @@ io.on('connection', (socket) => {
 httpServer.listen(port, (err) => {
   if (err) throw err;
   console.log(`> Socket.io server running on port ${port}`);
-  console.log(`> Next.js app should be running on port 3002`);
+  console.log(`> Next.js app URL: ${nextjsAppUrl}`);
+  console.log(`> CORS origin: ${corsOrigin}`);
 });

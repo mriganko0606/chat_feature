@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: messageapp-nextjs
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: MONGODB_URI
+        value: your_mongodb_connection_string
+      - key: NEXT_PUBLIC_SOCKET_URL
+        value: https://your-socket-server.onrender.com
