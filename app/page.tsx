@@ -275,6 +275,10 @@ export default function Home() {
         }}
         selectedUser={selectedUser}
         productToShare={productToShare}
+        onUserChange={(user) => {
+          setSelectedUser(user);
+          router.push(`/dashboard?userId=${user._id}`);
+        }}
       />
     </div>
   );

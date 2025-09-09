@@ -27,9 +27,10 @@ interface DashboardModalProps {
   onClose: () => void;
   selectedUser: User | null;
   productToShare?: Product | null;
+  onUserChange?: (user: User) => void;
 }
 
-export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }: DashboardModalProps) {
+export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, onUserChange }: DashboardModalProps) {
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [newMessage, setNewMessage] = useState("");
   const [users, setUsers] = useState<User[]>([]);
@@ -305,7 +306,30 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
       <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-2xl w-[800px] h-[700px] max-w-[110vw] max-h-[70vh] overflow-hidden flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b bg-gray-50 dark:bg-gray-700">
-          <h2 className="text-xl font-bold text-gray-800 dark:text-white">Chat</h2>
+          <div className="flex items-center gap-4">
+            <h2 className="text-xl font-bold text-gray-800 dark:text-white">Chat</h2>
+            {/* User Selection Dropdown */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-600 dark:text-gray-300">Switch User:</span>
+              <select
+                value={selectedUser?._id?.toString() || ''}
+                onChange={(e) => {
+                  const user = users.find(u => u._id?.toString() === e.target.value);
+                  if (user && onUserChange) {
+                    onUserChange(user);
+                  }
+                }}
+                className="px-3 py-1 border rounded-lg text-sm bg-white dark:bg-gray-600 text-gray-900 dark:text-white"
+              >
+                <option value="">Select User</option>
+                {users.map((user) => (
+                  <option key={user._id?.toString()} value={user._id?.toString()}>
+                    {user.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="icon" className="h-8 w-8">
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
