@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 
 export default function TestImageUpload() {
   const [uploading, setUploading] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<{ success: boolean; imageUrl?: string; message: string; error?: string } | null>(null);
 
   const handleTestUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -26,7 +26,7 @@ export default function TestImageUpload() {
       setResult(data);
     } catch (error) {
       console.error('Upload error:', error);
-      setResult({ error: 'Upload failed' });
+      setResult({ success: false, message: 'Upload failed', error: 'Upload failed' });
     } finally {
       setUploading(false);
     }

@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
     const base64 = buffer.toString('base64');
-    const dataUrl = `data:${file.type};base64,${base64}`;
+    // const dataUrl = `data:${file.type};base64,${base64}`;
 
     // For now, we'll use a placeholder URL service
     // In production, you would upload to Cloudinary, AWS S3, or similar
@@ -41,10 +41,10 @@ export async function POST(request: NextRequest) {
       message: 'File uploaded successfully'
     });
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Upload error:', error);
     return NextResponse.json(
-      { success: false, message: 'Failed to upload file', error: error.message },
+      { success: false, message: 'Failed to upload file', error: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }
     );
   }

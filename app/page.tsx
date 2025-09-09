@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { MessageCircle, ShoppingBag, Star, MapPin, Calendar } from "lucide-react";
 import { DashboardModal } from "@/components/dashboard-modal";
 import { useState, useEffect } from "react";
-import { User, Product } from "@/lib/models";
+import { User, Product, Chat } from "@/lib/models";
 import { useRouter } from "next/navigation";
 
 export default function Home() {
@@ -69,7 +69,7 @@ export default function Home() {
         const response = await fetch(`/api/chats/unread?userId=${selectedUser._id}`);
         const data = await response.json();
         if (data.success) {
-          const total = data.chats.reduce((sum: number, chat: any) => {
+          const total = data.chats.reduce((sum: number, chat: Chat) => {
             return sum + (chat.unreadCount?.[selectedUser._id?.toString() || ''] || 0);
           }, 0);
           setTotalUnreadCount(total);
