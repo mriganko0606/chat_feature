@@ -27,10 +27,10 @@ interface DashboardModalProps {
   onClose: () => void;
   selectedUser: User | null;
   productToShare?: Product | null;
-  onUserChange?: (user: User) => void;
 }
 
-export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, onUserChange }: DashboardModalProps) {
+export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }: DashboardModalProps) {
+  const [currentUser, setCurrentUser] = useState<User | null>(selectedUser);
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [newMessage, setNewMessage] = useState("");
   const [users, setUsers] = useState<User[]>([]);
@@ -52,7 +52,7 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, 
     stopTyping,
   } = useChat({
     chatId: selectedChat?._id?.toString() || null,
-    currentUserId: selectedUser?._id?.toString() || "",
+    currentUserId: currentUser?._id?.toString() || "",
   });
 
   // Fetch users and chats
@@ -67,8 +67,8 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, 
         }
 
         // Fetch chats with unread counts
-        if (selectedUser) {
-          const chatsResponse = await fetch(`/api/chats/unread?userId=${selectedUser._id}`);
+        if (currentUser) {
+          const chatsResponse = await fetch(`/api/chats/unread?userId=${currentUser._id}`);
           const chatsData = await chatsResponse.json();
           if (chatsData.success) {
             setChats(chatsData.chats);
@@ -81,14 +81,21 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, 
       }
     };
 
-    if (selectedUser) {
+    if (currentUser) {
       fetchData();
     }
-  }, [selectedUser]);
+  }, [currentUser]);
+
+  // Sync with selectedUser prop when modal opens
+  useEffect(() => {
+    if (isOpen && selectedUser) {
+      setCurrentUser(selectedUser);
+    }
+  }, [isOpen, selectedUser]);
 
   // Mark messages as read when chat is selected
   useEffect(() => {
-    if (selectedChat && selectedUser) {
+    if (selectedChat && currentUser) {
       const markAsRead = async () => {
         try {
           await fetch('/api/messages/read', {
@@ -98,7 +105,7 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, 
             },
             body: JSON.stringify({
               chatId: selectedChat._id?.toString(),
-              userId: selectedUser._id?.toString(),
+              userId: currentUser._id?.toString(),
             }),
           });
         } catch (error) {
@@ -108,12 +115,12 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, 
 
       markAsRead();
     }
-  }, [selectedChat, selectedUser]);
+  }, [selectedChat, currentUser]);
 
   // Handle product sharing - create chat with owner and send product info
   useEffect(() => {
-    if (productToShare && selectedUser && isOpen) {
-      const productKey = `${productToShare._id}-${selectedUser._id}`;
+    if (productToShare && currentUser && isOpen) {
+      const productKey = `${productToShare._id}-${currentUser._id}`;
       
       // Only share if not already shared
       if (productSharedRef.current !== productKey) {
@@ -122,7 +129,7 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, 
             // Find or create a chat with the product owner
             const existingChat = chats.find(chat => 
               chat.users.length === 2 && 
-              chat.users.some(userId => userId.toString() === selectedUser._id?.toString()) &&
+              chat.users.some(userId => userId.toString() === currentUser._id?.toString()) &&
               chat.users.some(userId => userId.toString() === productToShare.owner.toString())
             );
 
@@ -141,7 +148,7 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, 
                 body: JSON.stringify({
                   chatName: `Chat with ${productToShare.owner.toString().slice(-6)}`,
                   isGroupChat: false,
-                  users: [selectedUser._id, productToShare.owner],
+                  users: [currentUser._id, productToShare.owner],
                 }),
               });
 
@@ -191,7 +198,7 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, 
         handleProductShare();
       }
     }
-  }, [productToShare, selectedUser, isOpen, chats, sendMessageSocket]);
+  }, [productToShare, currentUser, isOpen, chats, sendMessageSocket]);
 
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !selectedChat) return;
@@ -312,11 +319,12 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, 
             <div className="flex items-center gap-2">
               <span className="text-sm text-gray-600 dark:text-gray-300">Switch User:</span>
               <select
-                value={selectedUser?._id?.toString() || ''}
+                value={currentUser?._id?.toString() || ''}
                 onChange={(e) => {
                   const user = users.find(u => u._id?.toString() === e.target.value);
-                  if (user && onUserChange) {
-                    onUserChange(user);
+                  if (user) {
+                    setCurrentUser(user);
+                    setSelectedChat(null); // Clear selected chat when switching users
                   }
                 }}
                 className="px-3 py-1 border rounded-lg text-sm bg-white dark:bg-gray-600 text-gray-900 dark:text-white"
@@ -389,7 +397,7 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, 
               ) : (
                 <div className="space-y-1 p-2">
                   {chats.map((chat) => {
-                    const unreadCount = chat.unreadCount?.[selectedUser?._id?.toString() || ''] || 0;
+                    const unreadCount = chat.unreadCount?.[currentUser?._id?.toString() || ''] || 0;
                     return (
                       <button
                         key={chat._id?.toString()}
@@ -472,7 +480,7 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, 
                   ) : (
                     <>
                       {messages.map((message) => {
-                        const isCurrentUser = message.sender.toString() === selectedUser?._id?.toString();
+                        const isCurrentUser = message.sender.toString() === currentUser?._id?.toString();
                         
                         // Debug logging
                         if (message.messageType === 'image') {
