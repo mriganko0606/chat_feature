@@ -41,7 +41,9 @@ io.on('connection', (socket) => {
         messageType: data.messageType,
         hasImageUrl: !!data.imageUrl,
         imageUrl: data.imageUrl,
-        content: data.content
+        content: data.content,
+        replyTo: data.replyTo,
+        fullData: data
       });
 
       // Save message to database via Next.js API
@@ -56,7 +58,8 @@ io.on('connection', (socket) => {
           chat: data.chatId,
           readBy: data.readBy,
           imageUrl: data.imageUrl,
-          messageType: data.messageType || 'text'
+          messageType: data.messageType || 'text',
+          replyTo: data.replyTo
         })
       });
 

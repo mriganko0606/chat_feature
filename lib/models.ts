@@ -33,6 +33,7 @@ export interface Message {
   readBy: ObjectId[];
   imageUrl?: string;
   messageType: 'text' | 'image' | 'mixed';
+  replyTo?: ObjectId;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -72,6 +73,7 @@ export interface CreateMessageData {
   readBy?: ObjectId[];
   imageUrl?: string;
   messageType?: 'text' | 'image' | 'mixed';
+  replyTo?: ObjectId;
 }
 
 // Product creation data (without _id and timestamps)
@@ -115,6 +117,7 @@ export function createMessageDocument(data: CreateMessageData): Omit<Message, '_
     readBy: data.readBy || [],
     imageUrl: data.imageUrl,
     messageType: data.messageType || 'text',
+    replyTo: data.replyTo,
     createdAt: new Date(),
     updatedAt: new Date(),
   };

@@ -81,7 +81,7 @@ export const useChat = ({ chatId, currentUserId }: UseChatProps) => {
   }, [chatId]);
 
   // Send message
-  const sendMessage = async (content: string, imageUrl?: string, messageType: 'text' | 'image' | 'mixed' = 'text') => {
+  const sendMessage = async (content: string, imageUrl?: string, messageType: 'text' | 'image' | 'mixed' = 'text', replyTo?: string) => {
     if (!socket || !chatId) {
       console.log('Cannot send message - missing socket or chatId:', { socket: !!socket, chatId });
       return;
@@ -101,7 +101,8 @@ export const useChat = ({ chatId, currentUserId }: UseChatProps) => {
       sender: currentUserId,
       content: messageType === 'image' ? '' : content.trim(),
       imageUrl,
-      messageType
+      messageType,
+      replyTo
     });
 
     try {
@@ -111,6 +112,7 @@ export const useChat = ({ chatId, currentUserId }: UseChatProps) => {
         content: messageType === 'image' ? '' : content.trim(),
         imageUrl,
         messageType,
+        replyTo,
         readBy: [currentUserId]
       });
     } catch (error) {

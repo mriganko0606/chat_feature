@@ -15,7 +15,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
-import { X, Send, Image as ImageIcon, Paperclip } from "lucide-react";
+import { X, Send, Image as ImageIcon, Paperclip, Reply, X as XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { User, Message, Chat, Product } from "@/lib/models";
@@ -38,8 +38,12 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
   const [loading, setLoading] = useState(true);
   const [typingTimeout, setTypingTimeout] = useState<NodeJS.Timeout | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterType, setFilterType] = useState<"all" | "unread" | "read">("all");
   const productSharedRef = useRef<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Use the chat hook for real-time functionality
   const {
@@ -207,11 +211,26 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
     const messageContent = newMessage.trim();
     setNewMessage("");
     
+    // Reset textarea height
+    if (textareaRef.current) {
+      textareaRef.current.style.height = '40px';
+    }
+    
     // Stop typing indicator
     stopTyping();
     
-    // Send message via socket
-    await sendMessageSocket(messageContent);
+    // Debug logging
+    console.log('Sending message with reply:', {
+      content: messageContent,
+      replyingTo: replyingTo?._id?.toString(),
+      replyingToContent: replyingTo?.content
+    });
+    
+    // Send message via socket with reply info
+    await sendMessageSocket(messageContent, '', 'text', replyingTo?._id?.toString());
+    
+    // Clear reply after sending
+    setReplyingTo(null);
   };
 
   const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -246,7 +265,9 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
 
       if (uploadData.success) {
         // Send image message via socket with URL
-        await sendMessageSocket('', uploadData.imageUrl, 'image');
+        await sendMessageSocket('', uploadData.imageUrl, 'image', replyingTo?._id?.toString());
+        // Clear reply after sending
+        setReplyingTo(null);
       } else {
         alert('Failed to upload image: ' + uploadData.message);
       }
@@ -260,8 +281,14 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
     }
   };
 
-  const handleTyping = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleTyping = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setNewMessage(e.target.value);
+    
+    // Auto-resize textarea
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 120) + 'px';
+    }
     
     // Start typing indicator
     startTyping();
@@ -323,6 +350,57 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
     return "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg";
   };
 
+  const handleReplyToMessage = (message: Message) => {
+    setReplyingTo(message);
+  };
+
+  const cancelReply = () => {
+    setReplyingTo(null);
+  };
+
+  const getRepliedMessage = (message: Message) => {
+    if (!message.replyTo) return null;
+    return messages.find(m => m._id?.toString() === message.replyTo?.toString());
+  };
+
+  // Filter and search chats
+  const getFilteredChats = () => {
+    let filteredChats = chats;
+
+    // Apply search filter
+    if (searchQuery.trim()) {
+      filteredChats = filteredChats.filter(chat => {
+        const chatName = getOtherUserName(chat).toLowerCase();
+        return chatName.includes(searchQuery.toLowerCase());
+      });
+    }
+
+    // Apply filter type
+    if (filterType !== "all" && currentUser) {
+      const currentUserId = currentUser._id?.toString() || '';
+      filteredChats = filteredChats.filter(chat => {
+        const unreadCount = chat.unreadCount?.[currentUserId] || 0;
+        if (filterType === "unread") {
+          return unreadCount > 0;
+        } else if (filterType === "read") {
+          return unreadCount === 0;
+        }
+        return true;
+      });
+    }
+
+    return filteredChats;
+  };
+
+  // Clear all filters
+  const clearFilters = () => {
+    setSearchQuery("");
+    setFilterType("all");
+  };
+
+  // Check if any filters are active
+  const hasActiveFilters = searchQuery.trim() !== "" || filterType !== "all";
+
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     if (messagesEndRef.current) {
@@ -377,16 +455,6 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" className="h-8 w-8">
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-              </svg>
-            </Button>
-            <Button variant="ghost" size="icon" className="h-8 w-8">
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
-              </svg>
-            </Button>
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose}>
               <X className="h-4 w-4" />
             </Button>
@@ -407,34 +475,90 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                   <input
                     type="text"
                     placeholder="Search conversations..."
-                    className="w-full pl-10 pr-4 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 transition-all duration-200"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full pl-10 pr-10 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 transition-all duration-200"
                   />
+                  {searchQuery && (
+                    <button
+                      onClick={() => setSearchQuery("")}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                    >
+                      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  )}
                 </div>
-                <select className="px-3 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-[100px] bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-all duration-200">
-                  <option>All</option>
-                  <option>Unread</option>
-                  <option>Read</option>
-                </select>
+                <div className="flex gap-2">
+                  <select 
+                    value={filterType}
+                    onChange={(e) => setFilterType(e.target.value as "all" | "unread" | "read")}
+                    className="px-3 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-[100px] bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-all duration-200"
+                  >
+                    <option value="all">All</option>
+                    <option value="unread">Unread</option>
+                    <option value="read">Read</option>
+                  </select>
+                  {hasActiveFilters && (
+                    <button
+                      onClick={clearFilters}
+                      className="px-3 py-2.5 text-xs bg-gray-100 dark:bg-gray-600 text-gray-600 dark:text-gray-300 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-500 transition-colors"
+                      title="Clear filters"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
+
+            {/* Filter Status */}
+            {hasActiveFilters && (
+              <div className="px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-b border-blue-200 dark:border-blue-800">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                    <span className="text-xs text-blue-700 dark:text-blue-300 font-medium">
+                      {searchQuery.trim() && `Search: "${searchQuery}"`}
+                      {searchQuery.trim() && filterType !== "all" && " • "}
+                      {filterType !== "all" && `Filter: ${filterType.charAt(0).toUpperCase() + filterType.slice(1)}`}
+                    </span>
+                  </div>
+                  <span className="text-xs text-blue-600 dark:text-blue-400">
+                    {getFilteredChats().length} result{getFilteredChats().length !== 1 ? 's' : ''}
+                  </span>
+                </div>
+              </div>
+            )}
 
             {/* Conversations List */}
             <div className="flex-1 overflow-y-auto">
               {loading ? (
                 <div className="p-4 text-center text-gray-500">Loading conversations...</div>
-              ) : chats.length === 0 ? (
+              ) : getFilteredChats().length === 0 ? (
                 <div className="p-4 text-center text-gray-500">
                   <div className="mb-4">
                     <svg className="mx-auto h-16 w-16 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                     </svg>
                   </div>
-                  <p className="text-sm">No conversations found</p>
-                  <p className="text-xs text-gray-400 mt-1">Start a conversation!</p>
+                  <p className="text-sm">
+                    {searchQuery.trim() || filterType !== "all" 
+                      ? "No conversations match your search" 
+                      : "No conversations found"
+                    }
+                  </p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {searchQuery.trim() || filterType !== "all" 
+                      ? "Try adjusting your search or filter" 
+                      : "Start a conversation!"
+                    }
+                  </p>
                 </div>
               ) : (
                 <div className="space-y-1 p-2">
-                  {chats.map((chat) => {
+                  {getFilteredChats().map((chat) => {
                     const unreadCount = chat.unreadCount?.[currentUser?._id?.toString() || ''] || 0;
                     return (
                       <button
@@ -467,9 +591,7 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                               {chat.chatName.charAt(0).toUpperCase()}
                             </span>
                             {unreadCount > 0 && (
-                              <div className="absolute -top-1 -right-1 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shadow-lg border-2 border-white dark:border-gray-800">
-                                {unreadCount > 99 ? '99+' : unreadCount}
-                              </div>
+                              <div className="absolute -top-1 -right-1 w-3 h-3 rounded-full shadow-lg border-2 border-white dark:border-gray-800 bg-white dark:bg-purple-500"></div>
                             )}
                           </div>
                           <div className="flex-1 min-w-0">
@@ -477,7 +599,7 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                               <h3 className="text-sm font-semibold truncate text-gray-900 dark:text-gray-100">{getOtherUserName(chat)}</h3>
                               <div className="flex items-center gap-2">
                                 {unreadCount > 0 && (
-                                  <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                                  <div className="w-2 h-2 bg-white dark:bg-purple-500 rounded-full"></div>
                                 )}
                                 <span className="text-xs px-2 py-1 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
                                   {chat.isGroupChat ? "Group" : "Direct"}
@@ -549,8 +671,10 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                     <>
                       {messages.map((message) => {
                         const isCurrentUser = message.sender.toString() === currentUser?._id?.toString();
+                        const repliedMessage = getRepliedMessage(message);
                         
                         // Debug logging
+                        
                         if (message.messageType === 'image') {
                           console.log('Image message received:', {
                             messageType: message.messageType,
@@ -564,7 +688,7 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                             key={message._id?.toString()}
                             className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}
                           >
-                            <div className={`flex gap-3 max-w-[75%] ${isCurrentUser ? 'flex-row-reverse' : 'flex-row'}`}>
+                            <div className={`flex gap-3 max-w-[350px] min-w-[200px] ${isCurrentUser ? 'flex-row-reverse' : 'flex-row'}`}>
                               {!isCurrentUser && (
                                 <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-100 to-blue-200 dark:from-gray-600 dark:to-gray-700 flex items-center justify-center flex-shrink-0 shadow-sm">
                                   <img
@@ -575,12 +699,70 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                                 </div>
                               )}
                               <div
-                                className={`px-4 py-3 rounded-2xl shadow-sm border ${
+                                className={`px-4 py-3 rounded-2xl shadow-sm border relative group break-words overflow-wrap-anywhere ${
                                   isCurrentUser
                                     ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white border-blue-400'
                                     : 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white border-gray-200 dark:border-gray-600'
                                 }`}
+                                style={{ 
+                                  maxWidth: '100%',
+                                  wordWrap: 'break-word',
+                                  overflowWrap: 'break-word',
+                                  wordBreak: 'break-word'
+                                }}
                               >
+                                {/* Reply to message preview */}
+                                {repliedMessage && (
+                                  <div className={`mb-2 p-3 rounded-lg border-l-4 min-w-[210px] ${
+                                    isCurrentUser 
+                                      ? 'bg-blue-400/30 border-blue-300' 
+                                      : 'bg-gray-200 dark:bg-gray-600 border-gray-400 dark:border-gray-500'
+                                  }`}>
+                                    <div className="flex items-center gap-1 mb-2">
+                                      <span className={`text-xs font-medium ${
+                                        isCurrentUser ? 'text-blue-200' : 'text-gray-600 dark:text-gray-300'
+                                      }`}>
+                                        {getUserName(repliedMessage.sender.toString())}
+                                      </span>
+                                    </div>
+                                    
+                                    {repliedMessage.messageType === 'image' ? (
+                                      <div className="space-y-2">
+                                        <div className="flex items-center gap-1">
+                                          <span className="text-xs">📷</span>
+                                          <span className={`text-xs font-medium ${
+                                            isCurrentUser ? 'text-blue-100' : 'text-gray-700 dark:text-gray-200'
+                                          }`}>
+                                            Photo
+                                          </span>
+                                        </div>
+                                        {repliedMessage.imageUrl && (
+                                          <div className="relative">
+                                            <img
+                                              src={repliedMessage.imageUrl}
+                                              alt="Replied image"
+                                              className="w-16 h-12 rounded object-cover border border-white/20"
+                                              onError={(e) => {
+                                                e.currentTarget.style.display = 'none';
+                                              }}
+                                            />
+                                          </div>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <p className={`text-xs break-words overflow-wrap-anywhere ${
+                                        isCurrentUser ? 'text-blue-100' : 'text-gray-700 dark:text-gray-200'
+                                      }`} style={{ 
+                                        wordWrap: 'break-word',
+                                        overflowWrap: 'break-word',
+                                        wordBreak: 'break-word'
+                                      }}>
+                                        {repliedMessage.content}
+                                      </p>
+                                    )}
+                                  </div>
+                                )}
+
                                 {/* Image message */}
                                 {message.messageType === 'image' && (
                                   <div className="mb-2">
@@ -615,7 +797,11 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                                 
                                 {/* Text content */}
                                 {message.content && (
-                                  <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
+                                  <p className="text-sm whitespace-pre-wrap leading-relaxed break-words overflow-wrap-anywhere" style={{ 
+                                    wordWrap: 'break-word',
+                                    overflowWrap: 'break-word',
+                                    wordBreak: 'break-word'
+                                  }}>{message.content}</p>
                                 )}
                                 
                                 {/* Timestamp */}
@@ -629,6 +815,18 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                                     minute: '2-digit'
                                   })}
                                 </p>
+
+                                {/* Reply button */}
+                                <button
+                                  onClick={() => handleReplyToMessage(message)}
+                                  className={`absolute -right-2 -top-2 w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 ${
+                                    isCurrentUser 
+                                      ? 'bg-blue-400 hover:bg-blue-300' 
+                                      : 'bg-gray-300 hover:bg-gray-400 dark:bg-gray-600 dark:hover:bg-gray-500'
+                                  }`}
+                                >
+                                  <Reply className="w-3 h-3 text-white" />
+                                </button>
                               </div>
                             </div>
                           </div>
@@ -638,11 +836,16 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                       {/* Typing Indicators */}
                       {typingUsers.length > 0 && (
                         <div className="flex justify-start">
-                          <div className="flex gap-2 max-w-[70%]">
+                          <div className="flex gap-2 max-w-[350px] min-w-[200px]">
                             <div className="w-8 h-8 rounded-full bg-gray-300 dark:bg-gray-600 flex items-center justify-center flex-shrink-0">
                               <div className="w-6 h-6 rounded-full bg-gray-400 animate-pulse" />
                             </div>
-                            <div className="px-4 py-2 rounded-2xl bg-white dark:bg-gray-700">
+                            <div className="px-4 py-2 rounded-2xl bg-white dark:bg-gray-700 break-words overflow-wrap-anywhere" style={{ 
+                              maxWidth: '100%',
+                              wordWrap: 'break-word',
+                              overflowWrap: 'break-word',
+                              wordBreak: 'break-word'
+                            }}>
                               <div className="flex space-x-1">
                                 <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                                 <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
@@ -661,6 +864,55 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
 
                 {/* Message Input */}
                 <div className="p-4 border-t bg-gradient-to-r from-white to-slate-50 dark:from-gray-800 dark:to-slate-800">
+                  {/* Reply Preview */}
+                  {replyingTo && (
+                    <div className="mb-3 p-3 bg-gray-200 dark:bg-gray-600 rounded-lg border-l-4 border-gray-400 dark:border-gray-500 min-w-[210px]">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <Reply className="w-4 h-4 text-gray-600 dark:text-gray-300" />
+                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Replying to {getUserName(replyingTo.sender.toString())}
+                          </span>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={cancelReply}
+                          className="h-6 w-6 text-gray-500 hover:text-gray-700"
+                        >
+                          <XIcon className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      
+                      {replyingTo.messageType === 'image' ? (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-1">
+                            <span className="text-sm">📷</span>
+                            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                              Photo
+                            </span>
+                          </div>
+                          {replyingTo.imageUrl && (
+                            <div className="relative">
+                              <img
+                                src={replyingTo.imageUrl}
+                                alt="Replied image"
+                                className="w-16 h-12 rounded object-cover border border-gray-300 dark:border-gray-500"
+                                onError={(e) => {
+                                  e.currentTarget.style.display = 'none';
+                                }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-gray-700 dark:text-gray-200 truncate">
+                          {replyingTo.content}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                   <div className="flex gap-2">
                     {/* Image Upload Button */}
                     <div className="relative">
@@ -686,13 +938,25 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                       </Button>
                     </div>
                     
-                    <Input
+                    <textarea
+                      ref={textareaRef}
                       value={newMessage}
                       onChange={handleTyping}
-                      placeholder="Type a message..."
-                      onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                      className="flex-1 rounded-xl border-gray-200 dark:border-gray-600 focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 transition-all duration-200"
+                      placeholder={replyingTo ? `Reply to ${getUserName(replyingTo.sender.toString())}...` : "Type a message..."}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSendMessage();
+                        }
+                      }}
+                      className="flex-1 min-h-[40px] max-h-[120px] px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 transition-all duration-200 resize-none overflow-hidden"
                       disabled={!isConnected}
+                      rows={1}
+                      style={{
+                        height: '40px',
+                        minHeight: '40px',
+                        maxHeight: '120px'
+                      }}
                     />
                     <Button 
                       onClick={handleSendMessage} 

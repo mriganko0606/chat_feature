@@ -59,6 +59,9 @@ export async function POST(request: NextRequest) {
       ...body,
       sender: typeof body.sender === 'string' ? new ObjectId(body.sender) : body.sender,
       chat: typeof body.chat === 'string' ? new ObjectId(body.chat) : body.chat,
+      replyTo: body.replyTo ? 
+        (typeof body.replyTo === 'string' ? new ObjectId(body.replyTo) : body.replyTo) : 
+        undefined,
       readBy: body.readBy ? 
         body.readBy.map(userId => 
           typeof userId === 'string' ? new ObjectId(userId) : userId
