@@ -27,9 +27,10 @@ interface DashboardModalProps {
   onClose: () => void;
   selectedUser: User | null;
   productToShare?: Product | null;
+  onProductShared?: () => void; // Callback when product is shared
 }
 
-export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }: DashboardModalProps) {
+export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, onProductShared }: DashboardModalProps) {
   const [currentUser, setCurrentUser] = useState<User | null>(selectedUser);
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [newMessage, setNewMessage] = useState("");
@@ -41,6 +42,8 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState<"all" | "unread" | "read">("all");
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isMobile, setIsMobile] = useState(false);
   const productSharedRef = useRef<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -125,85 +128,9 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
   // Handle product sharing - create chat with owner and send product info
   useEffect(() => {
     if (productToShare && currentUser && isOpen) {
-      const productKey = `${productToShare._id}-${currentUser._id}`;
-      
-      // Only share if not already shared
-      if (productSharedRef.current !== productKey) {
-        const handleProductShare = async () => {
-          try {
-            // Find or create a chat with the product owner
-            const existingChat = chats.find(chat => 
-              chat.users.length === 2 && 
-              chat.users.some(userId => userId.toString() === currentUser._id?.toString()) &&
-              chat.users.some(userId => userId.toString() === productToShare.owner.toString())
-            );
-
-            let targetChat = existingChat;
-            
-            if (existingChat) {
-              // Use existing chat
-              setSelectedChat(existingChat);
-            } else {
-              // Create new chat with product owner
-              const chatResponse = await fetch('/api/chats', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  chatName: `Chat with ${productToShare.owner.toString().slice(-6)}`,
-                  isGroupChat: false,
-                  users: [currentUser._id, productToShare.owner],
-                }),
-              });
-
-              if (chatResponse.ok) {
-                const chatData = await chatResponse.json();
-                targetChat = chatData.chat;
-                if (targetChat) {
-                  setSelectedChat(targetChat);
-                }
-              }
-            }
-
-            // Mark as shared
-            productSharedRef.current = productKey;
-
-            // Wait for chat to be set and then send messages
-            if (targetChat) {
-              // Wait a bit for the chat to be properly set in the useChat hook
-              setTimeout(async () => {
-                console.log('Sending product image:', productToShare.imgUrl);
-                
-                // Use a test image URL if the product image is a placeholder
-                const imageUrl = productToShare.imgUrl.includes('via.placeholder.com') 
-                  ? 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400&h=300&fit=crop'
-                  : productToShare.imgUrl;
-                
-                // Send the product image first
-                console.log('About to send image message:', {
-                  imageUrl: imageUrl,
-                  messageType: 'image',
-                  chatId: targetChat._id?.toString()
-                });
-                await sendMessageSocket('', imageUrl, 'image');
-                
-                // Then send the description
-                setTimeout(async () => {
-                  await sendMessageSocket(`Hi! I'm interested in this product: ${productToShare.description}`);
-                }, 500);
-              }, 1500); // Increased delay to ensure chat is properly set
-            }
-
-          } catch (error) {
-            console.error('Error sharing product:', error);
-          }
-        };
-
-        handleProductShare();
-      }
+      shareProduct(productToShare);
     }
-  }, [productToShare, currentUser, isOpen, chats, sendMessageSocket]);
+  }, [productToShare, currentUser, isOpen]);
 
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !selectedChat) return;
@@ -398,6 +325,86 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
     setFilterType("all");
   };
 
+  // Function to share a product and create/switch to chat
+  const shareProduct = async (product: Product) => {
+    if (!currentUser) return;
+
+    try {
+      // Find existing chat with the product owner
+      const existingChat = chats.find(chat => 
+        chat.users.length === 2 && 
+        chat.users.some(userId => userId.toString() === currentUser._id?.toString()) &&
+        chat.users.some(userId => userId.toString() === product.owner.toString())
+      );
+
+      let targetChat = existingChat;
+      
+      if (existingChat) {
+        // Use existing chat - just select it
+        setSelectedChat(existingChat);
+        console.log('Switching to existing chat with product owner');
+      } else {
+        // Create new chat with product owner
+        console.log('Creating new chat with product owner');
+        
+        // Get owner name for better chat naming
+        const ownerUser = users.find(u => u._id?.toString() === product.owner.toString());
+        const ownerName = ownerUser?.name || 'Product Owner';
+        
+        const chatResponse = await fetch('/api/chats', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            chatName: `Chat with ${ownerName}`,
+            isGroupChat: false,
+            users: [currentUser._id, product.owner],
+          }),
+        });
+
+            if (chatResponse.ok) {
+              const chatData = await chatResponse.json();
+              targetChat = chatData.chat;
+              if (targetChat) {
+                // Add the new chat to the chats list immediately
+                setChats(prevChats => [...prevChats, targetChat!]);
+                setSelectedChat(targetChat);
+                console.log('New chat created and added to sidebar');
+              }
+            }
+      }
+
+      // Send product info
+      if (targetChat) {
+        // Wait for chat to be set and then send messages
+        setTimeout(async () => {
+          console.log('Sending product image:', product.imgUrl);
+          
+          // Use a test image URL if the product image is a placeholder
+          const imageUrl = product.imgUrl.includes('via.placeholder.com') 
+            ? 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400&h=300&fit=crop'
+            : product.imgUrl;
+          
+          // Send the product image first
+          await sendMessageSocket('', imageUrl, 'image');
+          
+          // Then send the description
+          setTimeout(async () => {
+            await sendMessageSocket(`Hi! I'm interested in this product: ${product.description}`);
+            // Call the callback when product is successfully shared
+            if (onProductShared) {
+              onProductShared();
+            }
+          }, 500);
+        }, 1000);
+      }
+
+    } catch (error) {
+      console.error('Error sharing product:', error);
+    }
+  };
+
   // Check if any filters are active
   const hasActiveFilters = searchQuery.trim() !== "" || filterType !== "all";
 
@@ -415,46 +422,79 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
     }
   }, [isOpen]);
 
+  // Check screen size and adjust layout
+  useEffect(() => {
+    const checkScreenSize = () => {
+      const mobile = window.innerWidth < 640; // sm breakpoint
+      const tablet = window.innerWidth < 1024;
+      setIsMobile(mobile);
+      setIsSidebarOpen(!mobile); // Auto-hide sidebar on mobile
+    };
+
+    checkScreenSize();
+    window.addEventListener('resize', checkScreenSize);
+    return () => window.removeEventListener('resize', checkScreenSize);
+  }, []);
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-end p-4">
+    <div className="fixed inset-0 z-50 flex items-end justify-end p-2 sm:p-4">
       {/* Backdrop */}
       <div 
         className="absolute inset-0 bg-black/30" 
         onClick={onClose}
       />
       
-      {/* Chat Modal - Similar to Shopee */}
-      <div className="relative bg-gradient-to-br from-white via-slate-50 to-blue-50 dark:from-gray-800 dark:via-slate-800 dark:to-blue-900 rounded-xl shadow-2xl w-[800px] h-[700px] max-w-[110vw] max-h-[70vh] overflow-hidden flex flex-col border border-gray-200 dark:border-gray-700">
+      {/* Chat Modal - Responsive */}
+      <div className={`relative bg-gradient-to-br from-white via-slate-50 to-blue-50 dark:from-gray-800 dark:via-slate-800 dark:to-blue-900 rounded-xl shadow-2xl overflow-hidden flex flex-col border border-gray-200 dark:border-gray-700 ${
+        isMobile 
+          ? 'w-full h-full max-w-none max-h-none rounded-none' 
+          : 'w-[400px] h-[600px] sm:w-[500px] sm:h-[700px] md:w-[700px] md:h-[700px] lg:w-[800px] lg:h-[700px] xl:w-[900px] xl:h-[750px] max-w-[95vw] max-h-[90vh]'
+      }`}>
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b bg-gradient-to-r from-slate-50 to-white dark:from-slate-800 dark:to-gray-700">
-          <div className="flex items-center gap-4">
-            <h2 className="text-xl font-bold text-gray-800 dark:text-white">Chat</h2>
-            {/* User Selection Dropdown */}
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-600 dark:text-gray-300">Switch User:</span>
-              <select
-                value={currentUser?._id?.toString() || ''}
-                onChange={(e) => {
-                  const user = users.find(u => u._id?.toString() === e.target.value);
-                  if (user) {
-                    setCurrentUser(user);
-                    setSelectedChat(null); // Clear selected chat when switching users
-                  }
-                }}
-                className="px-3 py-1 border rounded-lg text-sm bg-white dark:bg-gray-600 text-gray-900 dark:text-white"
+        <div className="flex items-center justify-between p-3 sm:p-4 border-b border-gray-200 dark:border-gray-600 bg-gradient-to-r from-slate-50 to-white dark:from-slate-800 dark:to-gray-700">
+          <div className="flex items-center gap-2 sm:gap-4 min-w-0 flex-1">
+            {/* Mobile sidebar toggle */}
+            {isMobile && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                className="h-8 w-8 flex-shrink-0"
               >
-                <option value="">Select User</option>
-                {users.map((user) => (
-                  <option key={user._id?.toString()} value={user._id?.toString()}>
-                    {user.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              </Button>
+            )}
+            <h2 className="text-lg sm:text-xl font-bold text-gray-800 dark:text-white truncate">Chat</h2>
+            {/* User Selection Dropdown - Hidden on mobile */}
+            {!isMobile && (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-600 dark:text-gray-300">Switch User:</span>
+                <select
+                  value={currentUser?._id?.toString() || ''}
+                  onChange={(e) => {
+                    const user = users.find(u => u._id?.toString() === e.target.value);
+                    if (user) {
+                      setCurrentUser(user);
+                      setSelectedChat(null); // Clear selected chat when switching users
+                    }
+                  }}
+                  className="px-3 py-1 border rounded-lg text-sm bg-white dark:bg-gray-600 text-gray-900 dark:text-white"
+                >
+                  <option value="">Select User</option>
+                  {users.map((user) => (
+                    <option key={user._id?.toString()} value={user._id?.toString()}>
+                      {user.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-shrink-0">
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose}>
               <X className="h-4 w-4" />
             </Button>
@@ -463,10 +503,24 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
 
         {/* Main Content */}
         <div className="flex flex-1 overflow-hidden">
+          {/* Mobile sidebar overlay */}
+          {isMobile && isSidebarOpen && (
+            <div 
+              className="absolute inset-0 bg-black/50 z-5"
+              onClick={() => setIsSidebarOpen(false)}
+            />
+          )}
+          
           {/* Left Sidebar - Conversations */}
-          <div className="w-80 border-r bg-gradient-to-b from-slate-50 to-white dark:from-slate-800 dark:to-gray-700 flex flex-col">
+          <div className={`${
+            isMobile 
+              ? `absolute inset-y-0 left-0 z-10 w-64 transform transition-transform duration-300 ease-in-out ${
+                  isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+                }`
+              : 'w-64 md:w-60 lg:w-64'
+          } border-r border-gray-200 dark:border-gray-600 bg-gradient-to-b from-slate-50 to-white dark:from-slate-800 dark:to-gray-700 flex flex-col`}>
             {/* Search Bar */}
-            <div className="p-4 border-b h-20 flex items-center">
+            <div className="p-3 sm:p-4 border-b border-gray-200 dark:border-gray-600 h-16 sm:h-20 flex items-center">
               <div className="flex gap-2 w-full">
                 <div className="relative flex-1">
                   <svg className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -477,7 +531,7 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                     placeholder="Search conversations..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-10 pr-10 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 transition-all duration-200"
+                    className="w-full pl-10 pr-10 py-2 sm:py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 transition-all duration-200 text-sm sm:text-base"
                   />
                   {searchQuery && (
                     <button
@@ -490,11 +544,11 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                     </button>
                   )}
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-1 sm:gap-2">
                   <select 
                     value={filterType}
                     onChange={(e) => setFilterType(e.target.value as "all" | "unread" | "read")}
-                    className="px-3 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-[100px] bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-all duration-200"
+                    className="px-2 sm:px-3 py-2 sm:py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-[80px] sm:min-w-[100px] bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-all duration-200 text-xs sm:text-sm"
                   >
                     <option value="all">All</option>
                     <option value="unread">Unread</option>
@@ -503,7 +557,7 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                   {hasActiveFilters && (
                     <button
                       onClick={clearFilters}
-                      className="px-3 py-2.5 text-xs bg-gray-100 dark:bg-gray-600 text-gray-600 dark:text-gray-300 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-500 transition-colors"
+                      className="px-2 sm:px-3 py-2 sm:py-2.5 text-xs bg-gray-100 dark:bg-gray-600 text-gray-600 dark:text-gray-300 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-500 transition-colors"
                       title="Clear filters"
                     >
                       Clear
@@ -515,17 +569,17 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
 
             {/* Filter Status */}
             {hasActiveFilters && (
-              <div className="px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-b border-blue-200 dark:border-blue-800">
+              <div className="px-3 sm:px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-b border-blue-200 dark:border-blue-700">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                    <span className="text-xs text-blue-700 dark:text-blue-300 font-medium">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <div className="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0"></div>
+                    <span className="text-xs text-blue-700 dark:text-blue-300 font-medium truncate">
                       {searchQuery.trim() && `Search: "${searchQuery}"`}
                       {searchQuery.trim() && filterType !== "all" && " • "}
                       {filterType !== "all" && `Filter: ${filterType.charAt(0).toUpperCase() + filterType.slice(1)}`}
                     </span>
                   </div>
-                  <span className="text-xs text-blue-600 dark:text-blue-400">
+                  <span className="text-xs text-blue-600 dark:text-blue-400 flex-shrink-0 ml-2">
                     {getFilteredChats().length} result{getFilteredChats().length !== 1 ? 's' : ''}
                   </span>
                 </div>
@@ -535,15 +589,15 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
             {/* Conversations List */}
             <div className="flex-1 overflow-y-auto">
               {loading ? (
-                <div className="p-4 text-center text-gray-500">Loading conversations...</div>
+                <div className="p-3 sm:p-4 text-center text-gray-500">Loading conversations...</div>
               ) : getFilteredChats().length === 0 ? (
-                <div className="p-4 text-center text-gray-500">
+                <div className="p-3 sm:p-4 text-center text-gray-500">
                   <div className="mb-4">
-                    <svg className="mx-auto h-16 w-16 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="mx-auto h-12 w-12 sm:h-16 sm:w-16 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                     </svg>
                   </div>
-                  <p className="text-sm">
+                  <p className="text-xs sm:text-sm">
                     {searchQuery.trim() || filterType !== "all" 
                       ? "No conversations match your search" 
                       : "No conversations found"
@@ -557,56 +611,77 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                   </p>
                 </div>
               ) : (
-                <div className="space-y-1 p-2">
+                <div className="space-y-1 p-1 sm:p-2">
                   {getFilteredChats().map((chat) => {
                     const unreadCount = chat.unreadCount?.[currentUser?._id?.toString() || ''] || 0;
                     return (
                       <button
                         key={chat._id?.toString()}
-                        onClick={() => setSelectedChat(chat)}
-                        className={`w-full p-3 text-left rounded-xl transition-all duration-200 ${
+                        onClick={() => {
+                          setSelectedChat(chat);
+                          if (isMobile) {
+                            setIsSidebarOpen(false); // Close sidebar on mobile when chat is selected
+                          }
+                        }}
+                        className={`w-full p-2 sm:p-3 text-left rounded-xl transition-all duration-200 ${
                           selectedChat?._id === chat._id
-                            ? 'bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-900 dark:to-blue-800 text-blue-900 dark:text-blue-100 shadow-sm border border-blue-200 dark:border-blue-700'
+                            ? 'bg-gray-100 dark:bg-gray-600 text-black dark:text-white shadow-sm border border-gray-200 dark:border-gray-500'
                             : 'hover:bg-gray-50 dark:hover:bg-gray-600/50 hover:shadow-sm'
                         }`}
                       >
-                        <div className="flex items-center gap-3">
-                          <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-100 to-blue-200 dark:from-gray-600 dark:to-gray-700 flex items-center justify-center relative overflow-hidden shadow-sm">
+                        <div className="flex items-center gap-2 sm:gap-3">
+                          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gray-300 dark:bg-gray-600 flex items-center justify-center relative overflow-hidden shadow-sm flex-shrink-0">
                             {chat.isGroupChat ? (
-                              <span className="text-sm font-semibold text-blue-700 dark:text-blue-200">
+                              <span className="text-xs sm:text-sm font-semibold text-gray-800 dark:text-gray-200">
                                 {chat.chatName.charAt(0).toUpperCase()}
                               </span>
                             ) : (
                               <img
                                 src={getOtherUserAvatar(chat)}
                                 alt={getOtherUserName(chat)}
-                                className="w-12 h-12 rounded-full object-cover"
+                                className="w-10 h-10 sm:w-12 sm:h-12 rounded-full object-cover"
                                 onError={(e) => {
                                   e.currentTarget.style.display = 'none';
                                   e.currentTarget.nextElementSibling?.classList.remove('hidden');
                                 }}
                               />
                             )}
-                            <span className={`text-sm font-semibold text-blue-700 dark:text-blue-200 ${chat.isGroupChat ? '' : 'hidden'}`}>
+                            <span className={`text-xs sm:text-sm font-semibold text-gray-800 dark:text-gray-200 ${chat.isGroupChat ? '' : 'hidden'}`}>
                               {chat.chatName.charAt(0).toUpperCase()}
                             </span>
                             {unreadCount > 0 && (
-                              <div className="absolute -top-1 -right-1 w-3 h-3 rounded-full shadow-lg border-2 border-white dark:border-gray-800 bg-white dark:bg-purple-500"></div>
+                              <div className="absolute -top-1 -right-1 w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full shadow-lg border-2 border-white dark:border-gray-800 bg-white dark:bg-purple-500"></div>
                             )}
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center justify-between mb-1">
-                              <h3 className="text-sm font-semibold truncate text-gray-900 dark:text-gray-100">{getOtherUserName(chat)}</h3>
-                              <div className="flex items-center gap-2">
+                              <h3 className={`text-xs sm:text-sm font-semibold truncate ${
+                                selectedChat?._id === chat._id 
+                                  ? 'text-black dark:text-white' 
+                                  : 'text-gray-900 dark:text-gray-100'
+                              }`}>{getOtherUserName(chat)}</h3>
+                              <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
                                 {unreadCount > 0 && (
-                                  <div className="w-2 h-2 bg-white dark:bg-purple-500 rounded-full"></div>
+                                  <div className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${
+                                    selectedChat?._id === chat._id 
+                                      ? 'bg-white' 
+                                      : 'bg-white dark:bg-purple-500'
+                                  }`}></div>
                                 )}
-                                <span className="text-xs px-2 py-1 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
+                                <span className={`text-xs px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full ${
+                                  selectedChat?._id === chat._id 
+                                    ? 'bg-gray-200 dark:bg-gray-500 text-gray-700 dark:text-gray-200' 
+                                    : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                                }`}>
                                   {chat.isGroupChat ? "Group" : "Direct"}
                                 </span>
                               </div>
                             </div>
-                            <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                            <p className={`text-xs truncate ${
+                              selectedChat?._id === chat._id 
+                                ? 'text-gray-600 dark:text-gray-300' 
+                                : 'text-gray-500 dark:text-gray-400'
+                            }`}>
                               {chat.users.length} participant{chat.users.length !== 1 ? 's' : ''}
                             </p>
                           </div>
@@ -624,37 +699,50 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
             {selectedChat ? (
               <>
                 {/* Chat Header */}
-                <div className="p-4 border-b bg-gradient-to-r from-white to-slate-50 dark:from-gray-800 dark:to-slate-800 h-20 flex items-center">
-                  <div className="flex items-center gap-3 w-full">
-                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-100 to-blue-200 dark:from-gray-600 dark:to-gray-700 flex items-center justify-center overflow-hidden shadow-sm">
+                <div className="p-3 sm:p-4 border-b border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 h-16 sm:h-20 flex items-center">
+                  <div className="flex items-center gap-2 sm:gap-3 w-full min-w-0">
+                    {/* Mobile back button */}
+                    {isMobile && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setIsSidebarOpen(true)}
+                        className="h-8 w-8 flex-shrink-0 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                      >
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                        </svg>
+                      </Button>
+                    )}
+                    <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gray-300 dark:bg-gray-600 flex items-center justify-center overflow-hidden shadow-sm flex-shrink-0 border-2 border-gray-200 dark:border-gray-600">
                       {selectedChat.isGroupChat ? (
-                        <span className="text-sm font-semibold text-blue-700 dark:text-blue-200">
+                        <span className="text-xs sm:text-sm font-semibold text-gray-800 dark:text-gray-200">
                           {selectedChat.chatName.charAt(0).toUpperCase()}
                         </span>
                       ) : (
                         <img
                           src={getOtherUserAvatar(selectedChat)}
                           alt={getOtherUserName(selectedChat)}
-                          className="w-12 h-12 rounded-full object-cover"
+                          className="w-10 h-10 sm:w-12 sm:h-12 rounded-full object-cover"
                           onError={(e) => {
                             e.currentTarget.style.display = 'none';
                             e.currentTarget.nextElementSibling?.classList.remove('hidden');
                           }}
                         />
                       )}
-                      <span className={`text-sm font-semibold text-blue-700 dark:text-blue-200 ${selectedChat.isGroupChat ? '' : 'hidden'}`}>
+                      <span className={`text-xs sm:text-sm font-semibold text-gray-800 dark:text-gray-200 ${selectedChat.isGroupChat ? '' : 'hidden'}`}>
                         {selectedChat.chatName.charAt(0).toUpperCase()}
                       </span>
                     </div>
-                    <div>
-                      <h3 className="font-semibold text-gray-900 dark:text-gray-100">{getOtherUserName(selectedChat)}</h3>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-sm sm:text-base font-semibold text-gray-900 dark:text-gray-100 truncate">{getOtherUserName(selectedChat)}</h3>
+                      <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 truncate">
                         {selectedChat.isGroupChat ? "Group Chat" : "Direct Message"}
                       </p>
                     </div>
-                    <div className="ml-auto flex items-center gap-2">
-                      <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'} shadow-sm`} />
-                      <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">
+                    <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
+                      <div className={`w-2 h-2 sm:w-3 sm:h-3 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'} shadow-sm`} />
+                      <span className="text-xs text-gray-600 dark:text-gray-400 font-medium hidden sm:inline">
                         {isConnected ? 'Connected' : 'Disconnected'}
                       </span>
                     </div>
@@ -662,11 +750,11 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                 </div>
 
                 {/* Messages Area */}
-                <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-slate-50 to-white dark:from-slate-800 dark:to-gray-900">
+                <div className="flex-1 overflow-y-auto p-2 sm:p-4 space-y-3 sm:space-y-4 bg-gradient-to-b from-slate-50 to-white dark:from-slate-800 dark:to-gray-900">
                   {messagesLoading ? (
-                    <div className="text-center text-gray-500">Loading messages...</div>
+                    <div className="text-center text-gray-500 text-sm sm:text-base">Loading messages...</div>
                   ) : messages.length === 0 ? (
-                    <div className="text-center text-gray-500">No messages yet. Start the conversation!</div>
+                    <div className="text-center text-gray-500 text-sm sm:text-base">No messages yet. Start the conversation!</div>
                   ) : (
                     <>
                       {messages.map((message) => {
@@ -688,21 +776,28 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                             key={message._id?.toString()}
                             className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}
                           >
-                            <div className={`flex gap-3 max-w-[350px] min-w-[200px] ${isCurrentUser ? 'flex-row-reverse' : 'flex-row'}`}>
+                            <div className={`flex gap-2 sm:gap-3 max-w-[280px] sm:max-w-[350px] min-w-[150px] sm:min-w-[200px] ${isCurrentUser ? 'flex-row-reverse' : 'flex-row'}`}>
                               {!isCurrentUser && (
-                                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-100 to-blue-200 dark:from-gray-600 dark:to-gray-700 flex items-center justify-center flex-shrink-0 shadow-sm">
+                                <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-gray-300 dark:bg-gray-600 flex items-center justify-center flex-shrink-0 shadow-sm">
                                   <img
                                     src={getUserAvatar(message.sender.toString())}
                                     alt={getUserName((message.sender.toString()))}
-                                    className="w-8 h-8 rounded-full object-cover"
+                                    className="w-6 h-6 sm:w-8 sm:h-8 rounded-full object-cover"
+                                    onError={(e) => {
+                                      e.currentTarget.style.display = 'none';
+                                      e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                                    }}
                                   />
+                                  <span className="text-xs sm:text-sm font-semibold text-gray-800 dark:text-gray-200 hidden">
+                                    {getUserName(message.sender.toString()).charAt(0).toUpperCase()}
+                                  </span>
                                 </div>
                               )}
                               <div
-                                className={`px-4 py-3 rounded-2xl shadow-sm border relative group break-words overflow-wrap-anywhere ${
+                                className={`px-3 sm:px-4 py-2 sm:py-3 rounded-2xl shadow-sm border relative group break-words overflow-wrap-anywhere ${
                                   isCurrentUser
-                                    ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white border-blue-400'
-                                    : 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white border-gray-200 dark:border-gray-600'
+                                    ? 'bg-[#FFDDF4] text-gray-800 border-pink-300'
+                                    : 'bg-gray-100 dark:bg-gray-200 text-gray-900 dark:text-gray-800 border-gray-200 dark:border-gray-300'
                                 }`}
                                 style={{ 
                                   maxWidth: '100%',
@@ -713,25 +808,25 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                               >
                                 {/* Reply to message preview */}
                                 {repliedMessage && (
-                                  <div className={`mb-2 p-3 rounded-lg border-l-4 min-w-[210px] ${
+                                  <div className={`mb-2 p-2 sm:p-3 rounded-lg border-l-4 min-w-[150px] sm:min-w-[210px] ${
                                     isCurrentUser 
-                                      ? 'bg-blue-400/30 border-blue-300' 
-                                      : 'bg-gray-200 dark:bg-gray-600 border-gray-400 dark:border-gray-500'
+                                      ? 'bg-pink-200/50 border-pink-400' 
+                                      : 'bg-gray-200 dark:bg-gray-300 border-gray-400 dark:border-gray-500'
                                   }`}>
-                                    <div className="flex items-center gap-1 mb-2">
+                                    <div className="flex items-center gap-1 mb-1 sm:mb-2">
                                       <span className={`text-xs font-medium ${
-                                        isCurrentUser ? 'text-blue-200' : 'text-gray-600 dark:text-gray-300'
+                                        isCurrentUser ? 'text-gray-700' : 'text-gray-600 dark:text-gray-300'
                                       }`}>
                                         {getUserName(repliedMessage.sender.toString())}
                                       </span>
                                     </div>
                                     
                                     {repliedMessage.messageType === 'image' ? (
-                                      <div className="space-y-2">
+                                      <div className="space-y-1 sm:space-y-2">
                                         <div className="flex items-center gap-1">
                                           <span className="text-xs">📷</span>
                                           <span className={`text-xs font-medium ${
-                                            isCurrentUser ? 'text-blue-100' : 'text-gray-700 dark:text-gray-200'
+                                            isCurrentUser ? 'text-gray-700' : 'text-gray-700 dark:text-gray-200'
                                           }`}>
                                             Photo
                                           </span>
@@ -741,7 +836,7 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                                             <img
                                               src={repliedMessage.imageUrl}
                                               alt="Replied image"
-                                              className="w-16 h-12 rounded object-cover border border-white/20"
+                                              className="w-12 h-9 sm:w-16 sm:h-12 rounded object-cover border border-white/20"
                                               onError={(e) => {
                                                 e.currentTarget.style.display = 'none';
                                               }}
@@ -751,7 +846,7 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                                       </div>
                                     ) : (
                                       <p className={`text-xs break-words overflow-wrap-anywhere ${
-                                        isCurrentUser ? 'text-blue-100' : 'text-gray-700 dark:text-gray-200'
+                                        isCurrentUser ? 'text-gray-700' : 'text-gray-700 dark:text-gray-200'
                                       }`} style={{ 
                                         wordWrap: 'break-word',
                                         overflowWrap: 'break-word',
@@ -766,9 +861,9 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                                 {/* Image message */}
                                 {message.messageType === 'image' && (
                                   <div className="mb-2">
-                                    <div className={`text-xs mb-2 px-2 py-1 rounded-full inline-block ${
+                                    <div className={`text-xs mb-1 sm:mb-2 px-2 py-1 rounded-full inline-block ${
                                       isCurrentUser 
-                                        ? 'bg-blue-400/20 text-blue-100' 
+                                        ? 'bg-pink-300/30 text-gray-700' 
                                         : 'bg-gray-100 dark:bg-gray-600 text-gray-600 dark:text-gray-300'
                                     }`}>
                                       📷 Product Image
@@ -778,7 +873,7 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                                         <img
                                           src={message.imageUrl}
                                           alt="Product image"
-                                          className="max-w-[220px] max-h-[220px] rounded-xl object-cover border-2 border-white/20 shadow-lg hover:shadow-xl transition-shadow duration-200"
+                                          className="max-w-[180px] sm:max-w-[220px] max-h-[180px] sm:max-h-[220px] rounded-xl object-cover border-2 border-white/20 shadow-lg hover:shadow-xl transition-shadow duration-200"
                                           onLoad={() => console.log('Image loaded successfully:', message.imageUrl)}
                                           onError={(e) => {
                                             console.log('Image failed to load:', message.imageUrl);
@@ -788,7 +883,7 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                                         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 rounded-xl transition-colors duration-200" />
                                       </div>
                                     ) : (
-                                      <div className="max-w-[220px] max-h-[220px] rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 flex items-center justify-center text-gray-500 dark:text-gray-400 text-sm">
+                                      <div className="max-w-[180px] sm:max-w-[220px] max-h-[180px] sm:max-h-[220px] rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 flex items-center justify-center text-gray-500 dark:text-gray-400 text-xs sm:text-sm">
                                         No image URL
                                       </div>
                                     )}
@@ -797,7 +892,7 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                                 
                                 {/* Text content */}
                                 {message.content && (
-                                  <p className="text-sm whitespace-pre-wrap leading-relaxed break-words overflow-wrap-anywhere" style={{ 
+                                  <p className="text-xs sm:text-sm whitespace-pre-wrap leading-relaxed break-words overflow-wrap-anywhere" style={{ 
                                     wordWrap: 'break-word',
                                     overflowWrap: 'break-word',
                                     wordBreak: 'break-word'
@@ -805,9 +900,9 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                                 )}
                                 
                                 {/* Timestamp */}
-                                <p className={`text-xs mt-2 ${
+                                <p className={`text-xs mt-1 sm:mt-2 ${
                                   isCurrentUser 
-                                    ? 'text-blue-100/80' 
+                                    ? 'text-gray-600' 
                                     : 'text-gray-500 dark:text-gray-400'
                                 }`}>
                                   {new Date(message.createdAt || '').toLocaleTimeString([], {
@@ -819,13 +914,13 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                                 {/* Reply button */}
                                 <button
                                   onClick={() => handleReplyToMessage(message)}
-                                  className={`absolute -right-2 -top-2 w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 ${
+                                  className={`absolute -right-1 sm:-right-2 -top-1 sm:-top-2 w-5 h-5 sm:w-6 sm:h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 ${
                                     isCurrentUser 
-                                      ? 'bg-blue-400 hover:bg-blue-300' 
+                                      ? 'bg-purple-400 hover:bg-purple-300' 
                                       : 'bg-gray-300 hover:bg-gray-400 dark:bg-gray-600 dark:hover:bg-gray-500'
                                   }`}
                                 >
-                                  <Reply className="w-3 h-3 text-white" />
+                                  <Reply className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-white" />
                                 </button>
                               </div>
                             </div>
@@ -836,20 +931,20 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                       {/* Typing Indicators */}
                       {typingUsers.length > 0 && (
                         <div className="flex justify-start">
-                          <div className="flex gap-2 max-w-[350px] min-w-[200px]">
-                            <div className="w-8 h-8 rounded-full bg-gray-300 dark:bg-gray-600 flex items-center justify-center flex-shrink-0">
-                              <div className="w-6 h-6 rounded-full bg-gray-400 animate-pulse" />
+                          <div className="flex gap-2 sm:gap-3 max-w-[280px] sm:max-w-[350px] min-w-[150px] sm:min-w-[200px]">
+                            <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-gray-300 dark:bg-gray-600 flex items-center justify-center flex-shrink-0">
+                              <div className="w-4 h-4 sm:w-6 sm:h-6 rounded-full bg-gray-400 animate-pulse" />
                             </div>
-                            <div className="px-4 py-2 rounded-2xl bg-white dark:bg-gray-700 break-words overflow-wrap-anywhere" style={{ 
+                            <div className="px-3 sm:px-4 py-2 rounded-2xl bg-white dark:bg-gray-700 break-words overflow-wrap-anywhere" style={{ 
                               maxWidth: '100%',
                               wordWrap: 'break-word',
                               overflowWrap: 'break-word',
                               wordBreak: 'break-word'
                             }}>
                               <div className="flex space-x-1">
-                                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                                <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                                <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                                <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                               </div>
                             </div>
                           </div>
@@ -863,14 +958,14 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                 </div>
 
                 {/* Message Input */}
-                <div className="p-4 border-t bg-gradient-to-r from-white to-slate-50 dark:from-gray-800 dark:to-slate-800">
+                <div className="p-2 sm:p-4 border-t border-gray-200 dark:border-gray-600 bg-gradient-to-r from-white to-slate-50 dark:from-gray-800 dark:to-slate-800">
                   {/* Reply Preview */}
                   {replyingTo && (
-                    <div className="mb-3 p-3 bg-gray-200 dark:bg-gray-600 rounded-lg border-l-4 border-gray-400 dark:border-gray-500 min-w-[210px]">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <Reply className="w-4 h-4 text-gray-600 dark:text-gray-300" />
-                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    <div className="mb-2 sm:mb-3 p-2 sm:p-3 bg-gray-200 dark:bg-gray-600 rounded-lg border-l-4 border-gray-400 dark:border-gray-500 min-w-[150px] sm:min-w-[210px]">
+                      <div className="flex items-center justify-between mb-1 sm:mb-2">
+                        <div className="flex items-center gap-1 sm:gap-2">
+                          <Reply className="w-3 h-3 sm:w-4 sm:h-4 text-gray-600 dark:text-gray-300" />
+                          <span className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300">
                             Replying to {getUserName(replyingTo.sender.toString())}
                           </span>
                         </div>
@@ -878,17 +973,17 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                           variant="ghost"
                           size="icon"
                           onClick={cancelReply}
-                          className="h-6 w-6 text-gray-500 hover:text-gray-700"
+                          className="h-5 w-5 sm:h-6 sm:w-6 text-gray-500 hover:text-gray-700"
                         >
-                          <XIcon className="h-4 w-4" />
+                          <XIcon className="h-3 w-3 sm:h-4 sm:w-4" />
                         </Button>
                       </div>
                       
                       {replyingTo.messageType === 'image' ? (
-                        <div className="space-y-2">
+                        <div className="space-y-1 sm:space-y-2">
                           <div className="flex items-center gap-1">
-                            <span className="text-sm">📷</span>
-                            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                            <span className="text-xs sm:text-sm">📷</span>
+                            <span className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-200">
                               Photo
                             </span>
                           </div>
@@ -897,7 +992,7 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                               <img
                                 src={replyingTo.imageUrl}
                                 alt="Replied image"
-                                className="w-16 h-12 rounded object-cover border border-gray-300 dark:border-gray-500"
+                                className="w-12 h-9 sm:w-16 sm:h-12 rounded object-cover border border-gray-300 dark:border-gray-500"
                                 onError={(e) => {
                                   e.currentTarget.style.display = 'none';
                                 }}
@@ -906,16 +1001,16 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                           )}
                         </div>
                       ) : (
-                        <p className="text-sm text-gray-700 dark:text-gray-200 truncate">
+                        <p className="text-xs sm:text-sm text-gray-700 dark:text-gray-200 truncate">
                           {replyingTo.content}
                         </p>
                       )}
                     </div>
                   )}
 
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 items-end">
                     {/* Image Upload Button */}
-                    <div className="relative">
+                    <div className="relative flex-shrink-0">
                       <input
                         type="file"
                         accept="image/*"
@@ -928,12 +1023,12 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                         size="icon"
                         variant="outline"
                         disabled={!isConnected || isUploading}
-                        className="h-10 w-10 rounded-xl border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="h-12 w-12 rounded-xl border-gray-300 dark:border-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {isUploading ? (
-                          <div className="w-4 h-4 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
+                          <div className="w-5 h-5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
                         ) : (
-                          <ImageIcon className="h-4 w-4" />
+                          <ImageIcon className="h-5 w-5" />
                         )}
                       </Button>
                     </div>
@@ -949,12 +1044,12 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                           handleSendMessage();
                         }
                       }}
-                      className="flex-1 min-h-[40px] max-h-[120px] px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 transition-all duration-200 resize-none overflow-hidden"
+                      className="flex-1 min-h-[48px] max-h-[120px] px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 transition-all duration-200 resize-none overflow-hidden text-base"
                       disabled={!isConnected}
                       rows={1}
                       style={{
-                        height: '40px',
-                        minHeight: '40px',
+                        height: '48px',
+                        minHeight: '48px',
                         maxHeight: '120px'
                       }}
                     />
@@ -962,13 +1057,13 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
                       onClick={handleSendMessage} 
                       size="icon"
                       disabled={!isConnected || !newMessage.trim()}
-                      className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="h-12 w-12 bg-[#FFDDF4] hover:bg-[#FFD1F0] text-gray-800 border border-pink-300 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
                     >
-                      <Send className="h-4 w-4" />
+                      <Send className="h-5 w-5" />
                     </Button>
                   </div>
                   {!isConnected && (
-                    <p className="text-xs text-red-500 mt-2">
+                    <p className="text-xs text-red-500 mt-1 sm:mt-2">
                       Connecting to server...
                     </p>
                   )}
@@ -977,14 +1072,14 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare }
             ) : (
               /* No Chat Selected */
               <div className="flex-1 flex items-center justify-center bg-gradient-to-b from-slate-50 to-white dark:from-slate-800 dark:to-gray-900">
-                <div className="text-center">
+                <div className="text-center p-4">
                   <div className="mb-4">
-                    <svg className="mx-auto h-16 w-16 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="mx-auto h-12 w-12 sm:h-16 sm:w-16 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                     </svg>
                   </div>
-                  <h3 className="text-lg font-medium text-gray-500 mb-2">Welcome to Chat</h3>
-                  <p className="text-sm text-gray-400">Select a conversation to start messaging</p>
+                  <h3 className="text-base sm:text-lg font-medium text-gray-500 mb-2">Welcome to Chat</h3>
+                  <p className="text-xs sm:text-sm text-gray-400">Select a conversation to start messaging</p>
                   {selectedUser && (
                     <p className="text-xs text-blue-500 mt-2">
                       Logged in as: {selectedUser.name}
