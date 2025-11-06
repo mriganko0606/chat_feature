@@ -94,12 +94,36 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, 
     }
   }, [currentUser]);
 
-  // Sync with selectedUser prop when modal opens
+  // Load saved user from localStorage on component mount
   useEffect(() => {
-    if (isOpen && selectedUser) {
+    const savedUser = localStorage.getItem('selectedChatUser');
+    if (savedUser) {
+      try {
+        const parsedUser = JSON.parse(savedUser);
+        setCurrentUser(parsedUser);
+      } catch (error) {
+        console.error('Error parsing saved user:', error);
+        localStorage.removeItem('selectedChatUser');
+      }
+    } else if (isOpen && selectedUser) {
+      // Only set selectedUser if no saved user exists
       setCurrentUser(selectedUser);
     }
-  }, [isOpen, selectedUser]);
+  }, []);
+
+  // Sync with selectedUser prop when modal opens (only if no user is currently selected)
+  useEffect(() => {
+    if (isOpen && selectedUser && !currentUser) {
+      setCurrentUser(selectedUser);
+    }
+  }, [isOpen, selectedUser, currentUser]);
+
+  // Save user selection to localStorage whenever currentUser changes
+  useEffect(() => {
+    if (currentUser) {
+      saveUserSelection(currentUser);
+    }
+  }, [currentUser]);
 
   // Mark messages as read when chat is selected
   useEffect(() => {
@@ -325,6 +349,15 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, 
     setFilterType("all");
   };
 
+  // Save user selection to localStorage
+  const saveUserSelection = (user: User) => {
+    try {
+      localStorage.setItem('selectedChatUser', JSON.stringify(user));
+    } catch (error) {
+      console.error('Error saving user selection:', error);
+    }
+  };
+
   // Function to share a product and create/switch to chat
   const shareProduct = async (product: Product) => {
     if (!currentUser) return;
@@ -479,6 +512,7 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, 
                     const user = users.find(u => u._id?.toString() === e.target.value);
                     if (user) {
                       setCurrentUser(user);
+                      saveUserSelection(user); // Save user selection to localStorage
                       setSelectedChat(null); // Clear selected chat when switching users
                     }
                   }}

@@ -3,8 +3,8 @@ const { Server } = require('socket.io');
 
 // Get port from environment variable or default to 3003
 const port = process.env.PORT || 3003;
-const nextjsAppUrl = process.env.NEXTJS_APP_URL || 'http://localhost:3002';
-const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:3002';
+const nextjsAppUrl = process.env.NEXTJS_APP_URL || 'http://localhost:3000';
+const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:3000';
 
 // Create HTTP server for Socket.io only
 const httpServer = createServer();
