@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ChatService } from '@/lib/database-services';
-import { ObjectId } from 'mongodb';
 
 // GET /api/chats/unread?userId=USER_ID - Get chats with unread counts for a user
 export async function GET(request: NextRequest) {

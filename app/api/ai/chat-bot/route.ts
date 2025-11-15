@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ChatService, MessageService, UserService } from '@/lib/database-services';
+import { ChatService, MessageService } from '@/lib/database-services';
 import { ObjectId } from 'mongodb';
 
 // GET /api/ai/chat-bot - Get or create AI bot chat for a user

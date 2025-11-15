@@ -37,7 +37,12 @@ export async function POST(request: NextRequest) {
 }
 
 // Generate AI response using Mistral
-async function generateAIResponse(message: string, conversationHistory: any[] = []): Promise<string> {
+interface ConversationMessage {
+  sender: 'user' | 'ai';
+  content: string;
+}
+
+async function generateAIResponse(message: string, conversationHistory: ConversationMessage[] = []): Promise<string> {
   try {
     // Build messages array for Mistral
     const messages = [
@@ -54,7 +59,7 @@ async function generateAIResponse(message: string, conversationHistory: any[] = 
     // Call Mistral API
     const result = await mistral.chat.complete({
       model: process.env.MISTRAL_MODEL || "mistral-small-latest",
-      messages: messages as any,
+      messages: messages,
     });
 
     // Extract response text
@@ -69,7 +74,7 @@ async function generateAIResponse(message: string, conversationHistory: any[] = 
       ? content 
       : content.map(chunk => {
           if (typeof chunk === 'string') return chunk;
-          if ('text' in chunk) return (chunk as any).text;
+          if ('text' in chunk) return (chunk as { text: string }).text;
           return '';
         }).join('');
 
