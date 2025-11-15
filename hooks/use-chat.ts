@@ -26,11 +26,19 @@ export const useChat = ({ chatId, currentUserId }: UseChatProps) => {
     }
   }, [socket, chatId]);
 
+  const [isAITyping, setIsAITyping] = useState(false);
+
   // Listen for new messages
   useEffect(() => {
     if (socket) {
       const handleNewMessage = (message: Message) => {
-        setMessages(prev => [...prev, message]);
+        setMessages(prev => {
+          // Avoid duplicates
+          if (prev.some(m => m._id?.toString() === message._id?.toString())) {
+            return prev;
+          }
+          return [...prev, message];
+        });
       };
 
       const handleTyping = (data: { userId: string }) => {
@@ -43,14 +51,26 @@ export const useChat = ({ chatId, currentUserId }: UseChatProps) => {
         setTypingUsers(prev => prev.filter(id => id !== data.userId));
       };
 
+      const handleAITyping = () => {
+        setIsAITyping(true);
+      };
+
+      const handleAIStopTyping = () => {
+        setIsAITyping(false);
+      };
+
       socket.on('new-message', handleNewMessage);
       socket.on('user-typing', handleTyping);
       socket.on('user-stopped-typing', handleStopTyping);
+      socket.on('ai-typing', handleAITyping);
+      socket.on('ai-stop-typing', handleAIStopTyping);
 
       return () => {
         socket.off('new-message', handleNewMessage);
         socket.off('user-typing', handleTyping);
         socket.off('user-stopped-typing', handleStopTyping);
+        socket.off('ai-typing', handleAITyping);
+        socket.off('ai-stop-typing', handleAIStopTyping);
       };
     }
   }, [socket, currentUserId]);
@@ -137,6 +157,7 @@ export const useChat = ({ chatId, currentUserId }: UseChatProps) => {
     messages,
     loading,
     typingUsers,
+    isAITyping,
     isConnected,
     fetchMessages,
     sendMessage,

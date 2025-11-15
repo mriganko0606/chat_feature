@@ -18,7 +18,7 @@ import {
 import { X, Send, Image as ImageIcon, Paperclip, Reply, X as XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { User, Message, Chat, Product } from "@/lib/models";
+import { User, Message, Chat } from "@/lib/models";
 import { useState, useEffect, useRef } from "react";
 import { useChat } from "@/hooks/use-chat";
 
@@ -26,11 +26,9 @@ interface DashboardModalProps {
   isOpen: boolean;
   onClose: () => void;
   selectedUser: User | null;
-  productToShare?: Product | null;
-  onProductShared?: () => void; // Callback when product is shared
 }
 
-export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, onProductShared }: DashboardModalProps) {
+export function DashboardModal({ isOpen, onClose, selectedUser }: DashboardModalProps) {
   const [currentUser, setCurrentUser] = useState<User | null>(selectedUser);
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [newMessage, setNewMessage] = useState("");
@@ -44,7 +42,6 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, 
   const [filterType, setFilterType] = useState<"all" | "unread" | "read">("all");
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
-  const productSharedRef = useRef<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -53,6 +50,7 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, 
     messages,
     loading: messagesLoading,
     typingUsers,
+    isAITyping,
     isConnected,
     fetchMessages,
     sendMessage: sendMessageSocket,
@@ -80,6 +78,31 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, 
           const chatsData = await chatsResponse.json();
           if (chatsData.success) {
             setChats(chatsData.chats);
+          }
+
+          // Automatically create/get AI bot chat for this user
+          try {
+            const aiChatResponse = await fetch(`/api/ai/chat-bot?userId=${currentUser._id}`);
+            const aiChatData = await aiChatResponse.json();
+            if (aiChatData.success && aiChatData.chat) {
+              // Check if AI bot chat already exists in chats list
+              const existingAIChat = chatsData.chats?.find((chat: Chat) => 
+                chat._id?.toString() === aiChatData.chat._id?.toString()
+              );
+              
+              if (!existingAIChat) {
+                // Add AI bot chat to the chats list
+                setChats(prevChats => {
+                  // Check if it's already in the list
+                  if (prevChats.some(c => c._id?.toString() === aiChatData.chat._id?.toString())) {
+                    return prevChats;
+                  }
+                  return [aiChatData.chat, ...prevChats];
+                });
+              }
+            }
+          } catch (error) {
+            console.error('Error fetching AI bot chat:', error);
           }
         }
       } catch (error) {
@@ -149,12 +172,6 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, 
     }
   }, [selectedChat, currentUser]);
 
-  // Handle product sharing - create chat with owner and send product info
-  useEffect(() => {
-    if (productToShare && currentUser && isOpen) {
-      shareProduct(productToShare);
-    }
-  }, [productToShare, currentUser, isOpen]);
 
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !selectedChat) return;
@@ -267,11 +284,23 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, 
   };
 
   const getUserAvatar = (userId: string) => {
+    // Check if this is an AI bot user by checking if the selected chat is an AI bot chat
+    if (selectedChat && (selectedChat.chatName.toLowerCase().includes('ai bot') || selectedChat.chatName.toLowerCase().includes('ai'))) {
+      const otherUserId = selectedChat.users.find(id => id.toString() !== currentUser?._id?.toString());
+      if (otherUserId && otherUserId.toString() === userId) {
+        return "/m-rainbow.svg";
+      }
+    }
     const user = users.find(u => u._id?.toString() === userId);
     return user?.pic || "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg";
   };
 
   const getOtherUserName = (chat: Chat) => {
+    // Check if this is an AI bot chat
+    if (chat.chatName.toLowerCase().includes('ai bot') || chat.chatName.toLowerCase().includes('ai')) {
+      return "AI Bot";
+    }
+    
     if (!currentUser || chat.isGroupChat) {
       return chat.chatName;
     }
@@ -289,6 +318,11 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, 
   const getOtherUserAvatar = (chat: Chat) => {
     if (!currentUser || chat.isGroupChat) {
       return "https://icon-library.com/images/anonymous-avatar-icon/anonymous-avatar-icon-25.jpg";
+    }
+    
+    // Check if this is an AI bot chat
+    if (chat.chatName.toLowerCase().includes('ai bot') || chat.chatName.toLowerCase().includes('ai')) {
+      return "/m-rainbow.svg";
     }
     
     // For direct messages, find the other user
@@ -358,85 +392,6 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, 
     }
   };
 
-  // Function to share a product and create/switch to chat
-  const shareProduct = async (product: Product) => {
-    if (!currentUser) return;
-
-    try {
-      // Find existing chat with the product owner
-      const existingChat = chats.find(chat => 
-        chat.users.length === 2 && 
-        chat.users.some(userId => userId.toString() === currentUser._id?.toString()) &&
-        chat.users.some(userId => userId.toString() === product.owner.toString())
-      );
-
-      let targetChat = existingChat;
-      
-      if (existingChat) {
-        // Use existing chat - just select it
-        setSelectedChat(existingChat);
-        console.log('Switching to existing chat with product owner');
-      } else {
-        // Create new chat with product owner
-        console.log('Creating new chat with product owner');
-        
-        // Get owner name for better chat naming
-        const ownerUser = users.find(u => u._id?.toString() === product.owner.toString());
-        const ownerName = ownerUser?.name || 'Product Owner';
-        
-        const chatResponse = await fetch('/api/chats', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            chatName: `Chat with ${ownerName}`,
-            isGroupChat: false,
-            users: [currentUser._id, product.owner],
-          }),
-        });
-
-            if (chatResponse.ok) {
-              const chatData = await chatResponse.json();
-              targetChat = chatData.chat;
-              if (targetChat) {
-                // Add the new chat to the chats list immediately
-                setChats(prevChats => [...prevChats, targetChat!]);
-                setSelectedChat(targetChat);
-                console.log('New chat created and added to sidebar');
-              }
-            }
-      }
-
-      // Send product info
-      if (targetChat) {
-        // Wait for chat to be set and then send messages
-        setTimeout(async () => {
-          console.log('Sending product image:', product.imgUrl);
-          
-          // Use a test image URL if the product image is a placeholder
-          const imageUrl = product.imgUrl.includes('via.placeholder.com') 
-            ? 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400&h=300&fit=crop'
-            : product.imgUrl;
-          
-          // Send the product image first
-          await sendMessageSocket('', imageUrl, 'image');
-          
-          // Then send the description
-          setTimeout(async () => {
-            await sendMessageSocket(`Hi! I'm interested in this product: ${product.description}`);
-            // Call the callback when product is successfully shared
-            if (onProductShared) {
-              onProductShared();
-            }
-          }, 500);
-        }, 1000);
-      }
-
-    } catch (error) {
-      console.error('Error sharing product:', error);
-    }
-  };
 
   // Check if any filters are active
   const hasActiveFilters = searchQuery.trim() !== "" || filterType !== "all";
@@ -448,12 +403,6 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, 
     }
   }, [messages]);
 
-  // Reset product sharing ref when modal closes
-  useEffect(() => {
-    if (!isOpen) {
-      productSharedRef.current = null;
-    }
-  }, [isOpen]);
 
   // Check screen size and adjust layout
   useEffect(() => {
@@ -469,22 +418,11 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, 
     return () => window.removeEventListener('resize', checkScreenSize);
   }, []);
 
-  if (!isOpen) return null;
-
+  // Always render - full screen chat app
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-end p-2 sm:p-4">
-      {/* Backdrop */}
-      <div 
-        className="absolute inset-0 bg-black/30" 
-        onClick={onClose}
-      />
-      
-      {/* Chat Modal - Responsive */}
-      <div className={`relative bg-gradient-to-br from-white via-slate-50 to-blue-50 dark:from-gray-800 dark:via-slate-800 dark:to-blue-900 rounded-xl shadow-2xl overflow-hidden flex flex-col border border-gray-200 dark:border-gray-700 ${
-        isMobile 
-          ? 'w-full h-full max-w-none max-h-none rounded-none' 
-          : 'w-[400px] h-[600px] sm:w-[500px] sm:h-[700px] md:w-[700px] md:h-[700px] lg:w-[800px] lg:h-[700px] xl:w-[900px] xl:h-[750px] max-w-[95vw] max-h-[90vh]'
-      }`}>
+    <div className="fixed inset-0 z-50 flex w-full h-full">
+      {/* Full Screen Chat */}
+      <div className="relative bg-gradient-to-br from-white via-slate-50 to-blue-50 dark:from-gray-800 dark:via-slate-800 dark:to-blue-900 w-full h-full overflow-hidden flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-3 sm:p-4 border-b border-gray-200 dark:border-gray-600 bg-gradient-to-r from-slate-50 to-white dark:from-slate-800 dark:to-gray-700">
           <div className="flex items-center gap-2 sm:gap-4 min-w-0 flex-1">
@@ -502,36 +440,29 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, 
               </Button>
             )}
             <h2 className="text-lg sm:text-xl font-bold text-gray-800 dark:text-white truncate">Chat</h2>
-            {/* User Selection Dropdown - Hidden on mobile */}
-            {!isMobile && (
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-600 dark:text-gray-300">Switch User:</span>
-                <select
-                  value={currentUser?._id?.toString() || ''}
-                  onChange={(e) => {
-                    const user = users.find(u => u._id?.toString() === e.target.value);
-                    if (user) {
-                      setCurrentUser(user);
-                      saveUserSelection(user); // Save user selection to localStorage
-                      setSelectedChat(null); // Clear selected chat when switching users
-                    }
-                  }}
-                  className="px-3 py-1 border rounded-lg text-sm bg-white dark:bg-gray-600 text-gray-900 dark:text-white"
-                >
-                  <option value="">Select User</option>
-                  {users.map((user) => (
-                    <option key={user._id?.toString()} value={user._id?.toString()}>
-                      {user.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-          </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose}>
-              <X className="h-4 w-4" />
-            </Button>
+            {/* User Selection Dropdown */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-600 dark:text-gray-300">Switch User:</span>
+              <select
+                value={currentUser?._id?.toString() || ''}
+                onChange={(e) => {
+                  const user = users.find(u => u._id?.toString() === e.target.value);
+                  if (user) {
+                    setCurrentUser(user);
+                    saveUserSelection(user); // Save user selection to localStorage
+                    setSelectedChat(null); // Clear selected chat when switching users
+                  }
+                }}
+                className="px-3 py-1 border rounded-lg text-sm bg-white dark:bg-gray-600 text-gray-900 dark:text-white"
+              >
+                <option value="">Select User</option>
+                {users.map((user) => (
+                  <option key={user._id?.toString()} value={user._id?.toString()}>
+                    {user.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
 
@@ -963,7 +894,7 @@ export function DashboardModal({ isOpen, onClose, selectedUser, productToShare, 
                       })}
                       
                       {/* Typing Indicators */}
-                      {typingUsers.length > 0 && (
+                      {(typingUsers.length > 0 || isAITyping) && (
                         <div className="flex justify-start">
                           <div className="flex gap-2 sm:gap-3 max-w-[280px] sm:max-w-[350px] min-w-[150px] sm:min-w-[200px]">
                             <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-gray-300 dark:bg-gray-600 flex items-center justify-center flex-shrink-0">
